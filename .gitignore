@@ -1,0 +1,13 @@
+.env
+.env.*
+!.env.example
+
+**/node_modules/
+**/.next/
+**/.venv/
+**/venv/
+**/__pycache__/
+*.pyc
+
+backend/chroma_data
+backend/chroma_data/

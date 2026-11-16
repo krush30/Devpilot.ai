@@ -1,0 +1,19 @@
+services:
+  db:
+    image: postgres:16
+    environment:
+      POSTGRES_USER: devpilot
+      POSTGRES_PASSWORD: devpilot
+      POSTGRES_DB: devpilot
+    ports: ["5432:5432"]
+    volumes: [pgdata:/var/lib/postgresql/data]
+  backend:
+    build: ./backend
+    env_file: .env
+    environment:
+      DATABASE_URL: postgresql+psycopg://devpilot:devpilot@db:5432/devpilot
+      OLLAMA_BASE_URL: http://host.docker.internal:11434/v1
+    ports: ["8000:8000"]
+    depends_on: [db]
+volumes:
+  pgdata:
