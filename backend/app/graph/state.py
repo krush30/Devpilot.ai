@@ -8,6 +8,7 @@ class AgentState(TypedDict, total=False):
     plan: list[str]
     queries: list[str]
     planner_attempts: int
+    question: str  # set when the task is too vague: the graph stops and asks the user
     # analyst
     hits: list[dict]
     analysis: str

@@ -1,5 +1,7 @@
+import ast
 import difflib
 import re
+import textwrap
 
 from langchain_core.runnables import RunnableConfig
 
@@ -20,7 +22,8 @@ You propose code changes; you never apply them. Reply with JSON only, in exactly
     "explanation": "why this change",
     "old": "for modify: the exact existing code to replace, copied verbatim from the excerpts",
     "new": "the replacement code (for create: the full new file)"}
- ]}
+ ],
+ "skipped_steps": ["any plan step you did not do (for example writing tests), with a short reason"]}
 Rules:
 - Copy "old" exactly as it appears in the excerpts, WITHOUT the "N: " line-number prefixes.
 - Keep changes small and focused, at most 5. Follow the conventions of the surrounding code.
@@ -65,6 +68,35 @@ def make_diff(path: str, action: str, old: str, new: str) -> str:
     ))
 
 
+_HUNK = re.compile(r"^@@ -(\d+)(,\d+)? \+(\d+)(,\d+)? @@")
+
+
+def check_syntax(path: str, code: str) -> tuple[str, str]:
+    """Cheap sanity check: does proposed Python parse? Returns (status, message)."""
+    if not path.endswith(".py") or not code.strip():
+        return "skipped", ""
+    try:
+        ast.parse(textwrap.dedent(code))
+    except SyntaxError as e:
+        return "error", f"line {e.lineno}: {e.msg}"
+    return "ok", ""
+
+
+def real_hunks(diff: str, line: int | None) -> str:
+    """difflib numbers hunks relative to the snippet; shift them to the real file position."""
+    if not line:
+        return diff
+    off, out = line - 1, []
+    for text in diff.split("\n"):
+        m = _HUNK.match(text)
+        if m:
+            a, c = int(m[1]), int(m[3])
+            text = (f"@@ -{a + off if a else a}{m[2] or ''} +{c + off if c else c}{m[4] or ''} @@"
+                    + text[m.end():])
+        out.append(text)
+    return "\n".join(out)
+
+
 def build_proposal(data: dict, hits: list[dict]) -> dict:
     changes = []
     for c in data.get("changes", [])[:MAX_CHANGES]:
@@ -74,16 +106,21 @@ def build_proposal(data: dict, hits: list[dict]) -> dict:
         old = strip_line_numbers(str(c.get("old", "")))
         new = strip_line_numbers(str(c.get("new", "")))
         line = locate(path, old, hits) if action == "modify" else None
+        syntax, syntax_error = check_syntax(path, new)
         changes.append({
             "path": path, "action": action, "explanation": str(c.get("explanation", "")),
             "line": line,
             # Guardrail: a modify is only "verified" if its `old` text really exists in the repo.
             "verified": action == "create" or line is not None,
-            "diff": make_diff(path, action, old, new),
+            "syntax": syntax, "syntax_error": syntax_error,
+            "diff": real_hunks(make_diff(path, action, old, new), line),
         })
     if not changes:
         raise ValueError("no valid changes in reply")
-    return {"summary": str(data.get("summary", "")), "changes": changes}
+    skipped = []
+    for item in data.get("skipped_steps", [])[:6]:
+        skipped.append(f"{item.get('step', '')}: {item.get('reason', '')}" if isinstance(item, dict) else str(item))
+    return {"summary": str(data.get("summary", "")), "changes": changes, "skipped": skipped}
 
 
 async def coder(state: AgentState, config: RunnableConfig) -> dict:
@@ -97,11 +134,16 @@ async def coder(state: AgentState, config: RunnableConfig) -> dict:
     try:
         text, provider = await ask([{"role": "system", "content": SYSTEM}, {"role": "user", "content": user}])
         proposal = build_proposal(extract_json(text), state.get("hits", []))
+        problems = []
         bad = [c["path"] for c in proposal["changes"] if not c["verified"]]
-        if bad and attempt < MAX_ATTEMPTS:
-            raise ValueError(
-                f"the 'old' code for {', '.join(bad)} was not found in the excerpts; "
-                "copy it exactly, without line-number prefixes")
+        if bad:
+            problems.append(f"the 'old' code for {', '.join(bad)} was not found in the excerpts; "
+                            "copy it exactly, without line-number prefixes")
+        broken = [f"{c['path']} ({c['syntax_error']})" for c in proposal["changes"] if c["syntax"] == "error"]
+        if broken:
+            problems.append(f"the new code has Python syntax errors: {', '.join(broken)}")
+        if problems and attempt < MAX_ATTEMPTS:  # on the last attempt, show it with warnings instead
+            raise ValueError("; ".join(problems))
     except AllProvidersFailed as e:
         await emit(config, "coder", "error", {"message": str(e)})
         return {"fatal": f"No model provider available: {e}"}

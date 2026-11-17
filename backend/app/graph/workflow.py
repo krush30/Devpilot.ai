@@ -14,7 +14,7 @@ from app.graph.state import AgentState
 
 
 def after_planner(state: AgentState) -> str:
-    if state.get("fatal"):
+    if state.get("fatal") or state.get("question"):
         return "end"
     return "analyst" if state.get("plan") else "planner"
 

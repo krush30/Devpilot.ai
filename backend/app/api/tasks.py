@@ -29,7 +29,8 @@ async def run_task(req: TaskRequest) -> StreamingResponse:
                 config={"configurable": {"emit": emit}},
             )
             await emit({"agent": "system", "status": "finished",
-                        "data": {"ok": bool(final.get("proposal")), "error": final.get("fatal", "")}})
+                        "data": {"ok": bool(final.get("proposal")), "error": final.get("fatal", ""),
+                                 "question": final.get("question", "")}})
         except Exception as e:  # unexpected bug: tell the client instead of hanging
             await emit({"agent": "system", "status": "finished", "data": {"ok": False, "error": str(e)}})
         finally:

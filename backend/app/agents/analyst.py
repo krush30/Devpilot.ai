@@ -8,6 +8,7 @@ from app.llm.router import AllProvidersFailed
 from app.rag.retrieval import format_context, search
 
 MAX_HITS = 8
+MIN_SCORE = 0.15  # cosine similarity floor; tune using the scores shown in the UI
 
 SYSTEM = """You are the Code Analyst in a team of software engineering agents.
 You are given a task, a plan, and numbered excerpts from the repository.
@@ -25,10 +26,13 @@ async def analyst(state: AgentState, config: RunnableConfig) -> dict:
             key = (h["path"], h["start_line"])
             if key not in best or h["score"] > best[key]["score"]:
                 best[key] = h
-    hits = sorted(best.values(), key=lambda h: h["score"], reverse=True)[:MAX_HITS]
+    ranked = sorted(best.values(), key=lambda h: h["score"], reverse=True)
+    best_score = ranked[0]["score"] if ranked else 0.0
+    hits = [h for h in ranked if h["score"] >= MIN_SCORE][:MAX_HITS]
     files = [{k: h[k] for k in ("path", "start_line", "end_line", "score")} for h in hits]
     if not hits:
-        msg = "No relevant code found. Is the repository indexed?"
+        msg = (f"No sufficiently relevant code found (best match score {best_score:.2f}, "
+               f"minimum {MIN_SCORE}). Try rephrasing the task, or check that the repository is indexed.")
         await emit(config, "analyst", "error", {"message": msg})
         return {"hits": [], "fatal": msg}
 
