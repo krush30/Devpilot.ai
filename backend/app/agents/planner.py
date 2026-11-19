@@ -31,7 +31,9 @@ async def planner(state: AgentState, config: RunnableConfig) -> dict:
     if state.get("error"):
         user += f"\n\nYour previous reply was rejected: {state['error']}. Reply with valid JSON only."
     try:
-        text, provider = await ask([{"role": "system", "content": SYSTEM}, {"role": "user", "content": user}])
+        # Same task + same file list => same plan, so repeat runs skip this call. (Not cached for the coder:
+        # re-running a task should give a fresh attempt.)
+        text, provider = await ask([{"role": "system", "content": SYSTEM}, {"role": "user", "content": user}], cache=True)
         data = extract_json(text)
         if data.get("clear", True) is False:
             question = str(data.get("question", "")).strip() or DEFAULT_QUESTION

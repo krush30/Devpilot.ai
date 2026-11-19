@@ -1,4 +1,4 @@
-export type AgentName = "planner" | "analyst" | "coder";
+export type AgentName = "github" | "planner" | "analyst" | "coder";
 export type AgentStatus =
   | "pending"
   | "running"
@@ -45,11 +45,16 @@ export async function runTask(
   repoId: string,
   onEvent: (e: AgentEvent) => void,
   signal?: AbortSignal,
+  issue?: { repo: string; number: number },
 ): Promise<void> {
   const res = await fetch(`${BASE}/api/tasks/run`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ task, repo_id: repoId }),
+    body: JSON.stringify({
+      task,
+      repo_id: repoId,
+      ...(issue ? { github_repo: issue.repo, issue_number: issue.number } : {}),
+    }),
     signal,
   });
   if (!res.ok || !res.body) {
@@ -58,7 +63,7 @@ export async function runTask(
       const j = await res.json();
       if (typeof j.detail === "string") detail = j.detail;
       else if (Array.isArray(j.detail))
-        detail = "Task must be at least 5 characters.";
+        detail = "Enter a task (5+ characters) or pick a GitHub issue.";
     } catch {
       /* keep default */
     }

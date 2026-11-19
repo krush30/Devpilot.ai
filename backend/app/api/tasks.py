@@ -25,7 +25,9 @@ async def run_task(req: TaskRequest) -> StreamingResponse:
     async def runner() -> None:
         try:
             final = await graph.ainvoke(
-                {"task": req.task, "repo_id": req.repo_id},
+                {"task": req.task, "repo_id": req.repo_id,
+                 **({"github_repo": req.github_repo, "issue_number": req.issue_number}
+                    if req.github_repo and req.issue_number else {})},
                 config={"configurable": {"emit": emit}},
             )
             await emit({"agent": "system", "status": "finished",

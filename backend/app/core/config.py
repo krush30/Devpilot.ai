@@ -16,6 +16,7 @@ class Settings(BaseSettings):
     ollama_model: str = "qwen3:8b"
     provider_order: str = "groq,openrouter,ollama"
     database_url: str = "postgresql+psycopg://devpilot:devpilot@localhost:5432/devpilot"
+    github_token: str = ""
 
 
 settings = Settings()

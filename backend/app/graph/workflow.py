@@ -1,6 +1,6 @@
 """The agent graph:  planner -> analyst -> coder, with retry loops and early exits.
 
-    START -> planner --(valid plan)--> analyst --(code found)--> coder --(proposal)--> END
+    START -> [github, only for issues] -> planner --(valid plan)--> analyst --(code found)--> coder --(proposal)--> END
                 ^  \\--(invalid, retry)-/            \\--(nothing found)--> END       |
                 |                                                                  |
                 +------------------ coder retries itself on invalid output <-------+
@@ -9,8 +9,17 @@ from langgraph.graph import END, START, StateGraph
 
 from app.agents.analyst import analyst
 from app.agents.coder import coder
+from app.agents.github import github
 from app.agents.planner import planner
 from app.graph.state import AgentState
+
+
+def start_route(state: AgentState) -> str:
+    return "github" if state.get("issue_number") and state.get("github_repo") else "planner"
+
+
+def after_github(state: AgentState) -> str:
+    return "end" if state.get("fatal") else "planner"
 
 
 def after_planner(state: AgentState) -> str:
@@ -31,10 +40,12 @@ def after_coder(state: AgentState) -> str:
 
 def build_graph():
     g = StateGraph(AgentState)
+    g.add_node("github", github)
     g.add_node("planner", planner)
     g.add_node("analyst", analyst)
     g.add_node("coder", coder)
-    g.add_edge(START, "planner")
+    g.add_conditional_edges(START, start_route, {"github": "github", "planner": "planner"})
+    g.add_conditional_edges("github", after_github, {"planner": "planner", "end": END})
     g.add_conditional_edges("planner", after_planner, {"planner": "planner", "analyst": "analyst", "end": END})
     g.add_conditional_edges("analyst", after_analyst, {"coder": "coder", "end": END})
     g.add_conditional_edges("coder", after_coder, {"coder": "coder", "end": END})

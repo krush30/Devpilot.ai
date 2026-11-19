@@ -12,6 +12,7 @@ import {
   TriangleAlert,
 } from "lucide-react";
 import { listRepos, type Repo } from "@/lib/api";
+import { loadIssues, type IssueSummary } from "@/lib/github";
 import {
   runTask,
   type AgentName,
@@ -29,12 +30,18 @@ type AgentView = {
 type Board = Record<AgentName, AgentView>;
 
 const AGENTS: { key: AgentName; title: string; blurb: string }[] = [
+  {
+    key: "github",
+    title: "GitHub",
+    blurb: "Reads the issue through an MCP server",
+  },
   { key: "planner", title: "Planner", blurb: "Breaks the task into steps" },
   { key: "analyst", title: "Analyst", blurb: "Finds the relevant code" },
   { key: "coder", title: "Coder", blurb: "Proposes the change" },
 ];
 
 const emptyBoard = (): Board => ({
+  github: { status: "pending", data: {} },
   planner: { status: "pending", data: {} },
   analyst: { status: "pending", data: {} },
   coder: { status: "pending", data: {} },
@@ -85,6 +92,28 @@ function AgentBody({ agent, view }: { agent: AgentName; view: AgentView }) {
       <p className="text-sm text-red-300">{String(d.message ?? "Failed")}</p>
     );
   if (view.note) return <p className="text-sm text-amber-300">{view.note}</p>;
+  if (agent === "github" && d.title) {
+    return (
+      <div className="space-y-1 text-sm text-zinc-200">
+        <p>
+          <a
+            href={String(d.url)}
+            target="_blank"
+            rel="noreferrer"
+            className="text-emerald-400 hover:underline"
+          >
+            #{String(d.number)}
+          </a>{" "}
+          {String(d.title)}
+        </p>
+        {Array.isArray(d.labels) && d.labels.length > 0 && (
+          <p className="text-xs text-zinc-500">
+            {(d.labels as string[]).join(", ")}
+          </p>
+        )}
+      </div>
+    );
+  }
   if (agent === "planner" && view.status === "needs_input") {
     return (
       <p className="text-sm text-amber-300">
@@ -185,6 +214,11 @@ export default function TasksPage() {
   const [repos, setRepos] = useState<Repo[]>([]);
   const [repoId, setRepoId] = useState("");
   const [task, setTask] = useState("");
+  const [ghRepo, setGhRepo] = useState("");
+  const [issues, setIssues] = useState<IssueSummary[]>([]);
+  const [issue, setIssue] = useState<IssueSummary | null>(null);
+  const [ghLoading, setGhLoading] = useState(false);
+  const [ghError, setGhError] = useState("");
   const [board, setBoard] = useState<Board>(emptyBoard());
   const [running, setRunning] = useState(false);
   const [result, setResult] = useState<{
@@ -205,9 +239,28 @@ export default function TasksPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  async function onLoadIssues() {
+    if (!ghRepo.trim() || ghLoading) return;
+    setGhLoading(true);
+    setGhError("");
+    setIssue(null);
+    try {
+      const list = await loadIssues(ghRepo.trim());
+      setIssues(list);
+      if (list.length === 0) setGhError("No open issues found.");
+    } catch (err) {
+      setIssues([]);
+      setGhError((err as Error).message);
+    } finally {
+      setGhLoading(false);
+    }
+  }
+
+  const canRun = !!repoId && (!!task.trim() || !!issue);
+
   async function onRun(e: FormEvent) {
     e.preventDefault();
-    if (!task.trim() || !repoId || running) return;
+    if (!canRun || running) return;
     setBoard(emptyBoard());
     setResult(null);
     setError("");
@@ -237,6 +290,7 @@ export default function TasksPage() {
           });
         },
         abortRef.current.signal,
+        issue ? { repo: ghRepo.trim(), number: issue.number } : undefined,
       );
     } catch (err) {
       if ((err as Error).name !== "AbortError")
@@ -286,11 +340,60 @@ export default function TasksPage() {
               </option>
             ))}
           </select>
+          <p className="pt-1 text-xs font-medium uppercase tracking-wide text-zinc-400">
+            GitHub issue (optional)
+          </p>
+          <div className="flex gap-2">
+            <input
+              value={ghRepo}
+              onChange={(e) => setGhRepo(e.target.value)}
+              placeholder="owner/name, e.g. psf/requests"
+              aria-label="GitHub repository"
+              className="flex-1 rounded-md border border-zinc-700 bg-zinc-900 px-3 py-2 text-sm outline-none focus:border-emerald-600"
+            />
+            <button
+              type="button"
+              onClick={onLoadIssues}
+              disabled={ghLoading || !ghRepo.trim()}
+              className="rounded-md border border-zinc-700 px-3 text-sm hover:bg-zinc-900 disabled:opacity-40"
+            >
+              {ghLoading ? "Loading" : "Load issues"}
+            </button>
+          </div>
+          {ghError && <p className="text-xs text-red-300">{ghError}</p>}
+          {issues.length > 0 && (
+            <ul className="max-h-48 space-y-1 overflow-y-auto rounded-md border border-zinc-800 p-1">
+              {issues.map((i) => (
+                <li key={i.number}>
+                  <button
+                    type="button"
+                    onClick={() =>
+                      setIssue(issue?.number === i.number ? null : i)
+                    }
+                    className={
+                      "w-full rounded px-2 py-1 text-left text-sm hover:bg-zinc-900 " +
+                      (issue?.number === i.number
+                        ? "bg-emerald-950 text-emerald-200"
+                        : "text-zinc-300")
+                    }
+                  >
+                    <span className="text-zinc-500">#{i.number}</span> {i.title}
+                  </button>
+                </li>
+              ))}
+            </ul>
+          )}
+          {issue && (
+            <p className="text-xs text-emerald-400">
+              Selected issue #{issue.number}. The agents will work from it;
+              click it again to deselect.
+            </p>
+          )}
           <label
             htmlFor="task"
             className="block text-xs font-medium uppercase tracking-wide text-zinc-400"
           >
-            Task
+            {issue ? "Extra instructions (optional)" : "Task"}
           </label>
           <textarea
             id="task"
@@ -302,7 +405,7 @@ export default function TasksPage() {
           />
           <button
             type="submit"
-            disabled={running || !task.trim() || !repoId}
+            disabled={running || !canRun}
             className="flex items-center gap-2 rounded-md bg-emerald-700 px-4 py-2 text-sm text-white hover:bg-emerald-600 disabled:opacity-40"
           >
             {running && <Loader2 size={14} className="animate-spin" />}
@@ -319,6 +422,7 @@ export default function TasksPage() {
         <ol className="space-y-3">
           {AGENTS.map((a) => {
             const view = board[a.key];
+            if (a.key === "github" && view.status === "pending") return null;
             return (
               <li key={a.key} className="rounded-lg border border-zinc-800 p-4">
                 <div className="flex items-center gap-3">

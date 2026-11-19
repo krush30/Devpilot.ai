@@ -4,6 +4,8 @@ from typing import TypedDict
 class AgentState(TypedDict, total=False):
     task: str
     repo_id: str
+    github_repo: str  # 'owner/name' when the task starts from a GitHub issue
+    issue_number: int
     # planner
     plan: list[str]
     queries: list[str]
