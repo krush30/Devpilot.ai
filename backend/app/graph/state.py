@@ -17,6 +17,12 @@ class AgentState(TypedDict, total=False):
     # coder
     proposal: dict
     coder_attempts: int
+    # reviewer
+    review: dict
+    review_rounds: int
+    review_feedback: str  # reviewer's findings, fed back to the coder on a revision
+    revise: bool
+    prev_proposal: dict  # kept so a failed revision never loses the first proposal
     # control flow
     error: str  # transient: fed back to the agent on retry
     fatal: str  # permanent: stops the graph

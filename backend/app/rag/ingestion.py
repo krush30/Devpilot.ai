@@ -32,8 +32,13 @@ def index_repo(name: str, path: str | None = None, git_url: str | None = None) -
 
     try:
         chunks = chunk_repo(root)
+        if not chunks:  # don't create an empty, unusable index
+            raise ValueError(
+                "No indexable files found. DevPilot reads text and code files (.py, .ts, .md, .json, ...); "
+                "files without an extension, such as a bare 'README', are skipped.")
         repo_id = slugify(name)
-        col = get_collection(repo_id, reset=True)  # re-index replaces old data
+        local_root = str(root.resolve()) if path and not git_url else None  # temp clones can't be edited
+        col = get_collection(repo_id, reset=True, root=local_root)  # re-index replaces old data
         for i in range(0, len(chunks), BATCH):
             batch = chunks[i:i + BATCH]
             col.add(

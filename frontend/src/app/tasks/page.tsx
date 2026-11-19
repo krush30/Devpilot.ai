@@ -19,7 +19,10 @@ import {
   type AgentStatus,
   type Change,
   type FileRef,
+  type Finding,
+  type StaticFlag,
 } from "@/lib/tasks";
+import ApplyPanel from "./ApplyPanel";
 
 type AgentView = {
   status: AgentStatus;
@@ -38,6 +41,11 @@ const AGENTS: { key: AgentName; title: string; blurb: string }[] = [
   { key: "planner", title: "Planner", blurb: "Breaks the task into steps" },
   { key: "analyst", title: "Analyst", blurb: "Finds the relevant code" },
   { key: "coder", title: "Coder", blurb: "Proposes the change" },
+  {
+    key: "reviewer",
+    title: "Reviewer",
+    blurb: "Checks the proposal and can send it back once",
+  },
 ];
 
 const emptyBoard = (): Board => ({
@@ -45,6 +53,7 @@ const emptyBoard = (): Board => ({
   planner: { status: "pending", data: {} },
   analyst: { status: "pending", data: {} },
   coder: { status: "pending", data: {} },
+  reviewer: { status: "pending", data: {} },
 });
 
 function StatusIcon({ status }: { status: AgentStatus }) {
@@ -87,11 +96,84 @@ function Diff({ text }: { text: string }) {
 
 function AgentBody({ agent, view }: { agent: AgentName; view: AgentView }) {
   const d = view.data;
-  if (view.status === "error")
+  if (
+    view.status === "error" &&
+    !(agent === "reviewer" && Array.isArray(d.static_flags))
+  )
     return (
       <p className="text-sm text-red-300">{String(d.message ?? "Failed")}</p>
     );
   if (view.note) return <p className="text-sm text-amber-300">{view.note}</p>;
+  if (agent === "reviewer" && d.verdict) {
+    const findings = (d.findings ?? []) as Finding[];
+    const tests = (d.suggested_tests ?? []) as string[];
+    const approved = d.verdict === "approve";
+    const sev = (s: string) =>
+      s === "high"
+        ? "text-red-300"
+        : s === "medium"
+          ? "text-amber-300"
+          : "text-zinc-400";
+    return (
+      <div className="space-y-3 text-sm">
+        <p className={approved ? "text-emerald-400" : "text-amber-300"}>
+          {approved
+            ? "Approved"
+            : d.sent_back
+              ? "Changes requested: sent back to the coder for one revision"
+              : "Changes requested (revision limit reached): the concerns below still apply"}
+        </p>
+        <p className="text-zinc-200">{String(d.summary ?? "")}</p>
+        {findings.length > 0 && (
+          <ul className="space-y-2">
+            {findings.map((f, i) => (
+              <li key={i} className="text-xs">
+                <span className={`font-medium uppercase ${sev(f.severity)}`}>
+                  {f.severity}
+                </span>{" "}
+                <span className="font-mono text-zinc-300">{f.path}</span>
+                <p className="text-zinc-300">{f.issue}</p>
+                {f.suggestion && (
+                  <p className="text-zinc-500">Fix: {f.suggestion}</p>
+                )}
+              </li>
+            ))}
+          </ul>
+        )}
+        {tests.length > 0 && (
+          <div className="text-xs text-zinc-300">
+            <p className="mb-1 font-medium text-zinc-400">
+              Suggested tests (DevPilot doesn&apos;t write or run them yet)
+            </p>
+            <ul className="list-disc space-y-1 pl-4">
+              {tests.map((t, i) => (
+                <li key={i}>{t}</li>
+              ))}
+            </ul>
+          </div>
+        )}
+      </div>
+    );
+  }
+  if (
+    agent === "reviewer" &&
+    view.status === "error" &&
+    Array.isArray(d.static_flags)
+  ) {
+    return (
+      <div className="space-y-2 text-xs">
+        <p className="text-amber-300">
+          {String(d.message ?? "The reviewer could not run.")}
+        </p>
+        {(d.static_flags as StaticFlag[]).map((f, i) => (
+          <p key={i} className="text-zinc-300">
+            {f.severity}: {f.rule} in{" "}
+            <span className="font-mono">{f.path}</span>
+          </p>
+        ))}
+      </div>
+    );
+  }
   if (agent === "github" && d.title) {
     return (
       <div className="space-y-1 text-sm text-zinc-200">
@@ -225,6 +307,7 @@ export default function TasksPage() {
     ok: boolean;
     error: string;
     question?: string;
+    proposal_id?: string;
   } | null>(null);
   const [error, setError] = useState("");
   const abortRef = useRef<AbortController | null>(null);
@@ -447,6 +530,12 @@ export default function TasksPage() {
           })}
         </ol>
 
+        {result?.proposal_id && <ApplyPanel proposalId={result.proposal_id} />}
+        {result && result.ok && result.error && (
+          <p className="rounded-md border border-amber-800 bg-amber-950 p-3 text-sm text-amber-200">
+            Note: {result.error}. The earlier proposal is shown above.
+          </p>
+        )}
         {result && !result.ok && result.question && (
           <p className="rounded-md border border-amber-800 bg-amber-950 p-3 text-sm text-amber-200">
             Add more detail to the task and run again.

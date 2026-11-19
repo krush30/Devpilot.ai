@@ -14,6 +14,7 @@ HIT = {
     "path": "app/main.py", "start_line": 10, "end_line": 14, "score": 0.9,
     "text": "@app.get('/health')\ndef health():\n    return {'status': 'ok'}\n",
 }
+REVIEW_OK = json.dumps({"verdict": "approve", "summary": "ok", "findings": [], "suggested_tests": []})
 PLAN = json.dumps({"steps": ["find health route", "add models route"], "search_queries": ["health route"]})
 
 
@@ -64,7 +65,7 @@ async def run(monkeypatch, replies, hits, events):
 async def test_happy_path_retries_bad_planner_json(monkeypatch, events):
     final, fake = await run(
         monkeypatch,
-        ["not json at all", PLAN, "The health route lives in app/main.py:10.", change("def health():\n    return {'status': 'ok'}")],
+        ["not json at all", PLAN, "The health route lives in app/main.py:10.", change("def health():\n    return {'status': 'ok'}"), REVIEW_OK],
         [HIT], events,
     )
     assert final["planner_attempts"] == 2
@@ -84,7 +85,7 @@ async def test_stops_when_nothing_found(monkeypatch, events):
 async def test_coder_retries_when_old_code_not_in_repo(monkeypatch, events):
     final, _ = await run(
         monkeypatch,
-        [PLAN, "analysis", change("this code does not exist"), change("def health():")],
+        [PLAN, "analysis", change("this code does not exist"), change("def health():"), REVIEW_OK],
         [HIT], events,
     )
     assert final["coder_attempts"] == 2 and final["proposal"]["changes"][0]["verified"]
@@ -125,7 +126,7 @@ async def test_sse_endpoint_streams_events(monkeypatch):
             return 3
 
     monkeypatch.setattr(tasks_mod, "get_collection", lambda _id: Col())
-    monkeypatch.setattr(base, "llm", FakeLLM([PLAN, "analysis", change("def health():")]))
+    monkeypatch.setattr(base, "llm", FakeLLM([PLAN, "analysis", change("def health():"), REVIEW_OK]))
     monkeypatch.setattr(analyst_mod, "search", lambda *a, **k: [HIT])
     monkeypatch.setattr(planner_mod, "list_files", lambda *a, **k: ["app/main.py"])
 
@@ -135,8 +136,10 @@ async def test_sse_endpoint_streams_events(monkeypatch):
         events = [json.loads(line[6:]) for line in resp.text.splitlines() if line.startswith("data: ")]
         missing = await client.post("/api/tasks/run", json={"task": "x" * 10, "repo_id": "r"})
     assert resp.headers["content-type"].startswith("text/event-stream")
-    assert [e["agent"] for e in events if e["status"] == "done"] == ["planner", "analyst", "coder"]
+    assert [e["agent"] for e in events if e["status"] == "done"] == ["planner", "analyst", "coder", "reviewer"]
     assert events[-1]["agent"] == "system" and events[-1]["data"]["ok"] is True
+    assert events[-1]["data"]["proposal_id"]
+    assert "old" not in json.dumps([e for e in events if e["agent"] == "coder"])  # raw code stays server-side
 
 
 VAGUE = json.dumps({"clear": False, "question": "Which part should be improved: speed, tests, or structure?"})
@@ -164,14 +167,14 @@ def broken_change():
 
 async def test_syntax_error_triggers_retry(monkeypatch, events):
     final, _ = await run(
-        monkeypatch, [PLAN, "analysis", broken_change(), change("def health():")], [HIT], events)
+        monkeypatch, [PLAN, "analysis", broken_change(), change("def health():"), REVIEW_OK], [HIT], events)
     assert final["coder_attempts"] == 2 and final["proposal"]["changes"][0]["syntax"] == "ok"
 
 
 async def test_skipped_steps_are_reported(monkeypatch, events):
     reply = json.loads(change("def health():"))
     reply["skipped_steps"] = [{"step": "write tests", "reason": "out of scope"}]
-    final, _ = await run(monkeypatch, [PLAN, "analysis", json.dumps(reply)], [HIT], events)
+    final, _ = await run(monkeypatch, [PLAN, "analysis", json.dumps(reply), REVIEW_OK], [HIT], events)
     assert final["proposal"]["skipped"] == ["write tests: out of scope"]
 
 

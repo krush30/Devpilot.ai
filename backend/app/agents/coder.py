@@ -112,7 +112,7 @@ def build_proposal(data: dict, hits: list[dict]) -> dict:
             "line": line,
             # Guardrail: a modify is only "verified" if its `old` text really exists in the repo.
             "verified": action == "create" or line is not None,
-            "syntax": syntax, "syntax_error": syntax_error,
+            "syntax": syntax, "syntax_error": syntax_error, "old": old, "new": new,
             "diff": real_hunks(make_diff(path, action, old, new), line),
         })
     if not changes:
@@ -123,12 +123,21 @@ def build_proposal(data: dict, hits: list[dict]) -> dict:
     return {"summary": str(data.get("summary", "")), "changes": changes, "skipped": skipped}
 
 
+def public_proposal(proposal: dict) -> dict:
+    """The version sent to the browser: no raw old/new code (the server keeps those for applying)."""
+    return {**proposal, "changes": [{k: v for k, v in c.items() if k not in ("old", "new")}
+                                    for c in proposal["changes"]]}
+
+
 async def coder(state: AgentState, config: RunnableConfig) -> dict:
     attempt = state.get("coder_attempts", 0) + 1
     await emit(config, "coder", "running", {"attempt": attempt})
     plan = "\n".join(f"- {s}" for s in state.get("plan", []))
     user = (f"Task: {state['task']}\n\nPlan:\n{plan}\n\nAnalysis:\n{state.get('analysis', '')}\n\n"
             f"Repository excerpts:\n{format_context(state.get('hits', []))}")
+    if state.get("review_feedback"):
+        user += ("\n\nA reviewer rejected your previous proposal. Fix these problems and return a "
+                 f"complete corrected proposal:\n{state['review_feedback']}")
     if state.get("error"):
         user += f"\n\nYour previous reply was rejected: {state['error']}"
     try:
@@ -153,5 +162,5 @@ async def coder(state: AgentState, config: RunnableConfig) -> dict:
             return {"coder_attempts": attempt, "fatal": f"Coder failed: {e}"}
         await emit(config, "coder", "retrying", {"reason": str(e)})
         return {"coder_attempts": attempt, "error": str(e)}
-    await emit(config, "coder", "done", proposal, provider)
+    await emit(config, "coder", "done", public_proposal(proposal), provider)
     return {"proposal": proposal, "coder_attempts": attempt, "error": ""}

@@ -7,6 +7,7 @@ from fastapi.responses import StreamingResponse
 from app.graph.workflow import graph
 from app.rag.store import get_collection
 from app.schemas.task import TaskRequest
+from app.security.proposals import store
 
 tasks = APIRouter(prefix="/api/tasks")
 
@@ -30,8 +31,10 @@ async def run_task(req: TaskRequest) -> StreamingResponse:
                     if req.github_repo and req.issue_number else {})},
                 config={"configurable": {"emit": emit}},
             )
+            proposal = final.get("proposal") or final.get("prev_proposal")  # survive a failed revision
+            pid = store.save(req.repo_id, proposal, final.get("review")) if proposal else ""
             await emit({"agent": "system", "status": "finished",
-                        "data": {"ok": bool(final.get("proposal")), "error": final.get("fatal", ""),
+                        "data": {"ok": bool(proposal), "error": final.get("fatal", ""), "proposal_id": pid,
                                  "question": final.get("question", "")}})
         except Exception as e:  # unexpected bug: tell the client instead of hanging
             await emit({"agent": "system", "status": "finished", "data": {"ok": False, "error": str(e)}})

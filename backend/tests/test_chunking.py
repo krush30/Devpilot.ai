@@ -31,3 +31,13 @@ def test_repo_walk_skips_junk(tmp_path):
 def test_leading_blank_lines_keep_real_line_numbers():
     chunks = chunk_text("a.py", "\n\nx = 1\ny = 2\n")
     assert chunks[0].start_line == 3 and chunks[0].text.startswith("x = 1")
+
+
+def test_empty_repo_is_rejected_not_indexed(tmp_path):
+    import pytest
+
+    from app.rag.ingestion import index_repo
+
+    (tmp_path / "README").write_text("extensionless files are skipped\n")
+    with pytest.raises(ValueError, match="No indexable files"):
+        index_repo("empty-test", path=str(tmp_path))

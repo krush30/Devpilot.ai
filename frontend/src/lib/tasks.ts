@@ -1,4 +1,4 @@
-export type AgentName = "github" | "planner" | "analyst" | "coder";
+export type AgentName = "github" | "planner" | "analyst" | "coder" | "reviewer";
 export type AgentStatus =
   | "pending"
   | "running"
@@ -24,6 +24,20 @@ export type Change = {
   diff: string;
 };
 
+export type Finding = {
+  severity: "high" | "medium" | "low";
+  path: string;
+  issue: string;
+  suggestion: string;
+};
+export type StaticFlag = {
+  path: string;
+  severity: string;
+  rule: string;
+  line: number | null;
+  text: string;
+};
+
 export type AgentEvent =
   | {
       agent: AgentName;
@@ -34,7 +48,12 @@ export type AgentEvent =
   | {
       agent: "system";
       status: "finished";
-      data: { ok: boolean; error: string; question?: string };
+      data: {
+        ok: boolean;
+        error: string;
+        question?: string;
+        proposal_id?: string;
+      };
     };
 
 const BASE = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
