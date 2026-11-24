@@ -22,7 +22,7 @@ class ApplyRequest(BaseModel):
 def _record(pid: str) -> dict:
     rec = store.get(pid)
     if not rec:
-        raise HTTPException(status_code=404, detail="Proposal not found or expired. Run the agents again.")
+        raise HTTPException(status_code=404, detail="Proposal not found. Run the agents again.")
     return rec
 
 
@@ -68,7 +68,7 @@ def apply(pid: str, body: ApplyRequest) -> dict:
                 continue
             out = apply_change(root, changes[idx], dry_run=body.dry_run)
             if out.status == "applied":
-                rec["applied"].append((idx, out.undo))
+                store.add_applied(pid, idx, out.undo)
             results.append({"index": idx, "path": path, "status": out.status, "detail": out.detail})
     return {"results": results, "root": str(root)}
 
@@ -78,10 +78,10 @@ def undo(pid: str) -> dict:
     rec = _record(pid)
     results = []
     with store.lock:
-        for idx, info in reversed(list(rec["applied"])):  # newest first, so stacked edits unwind cleanly
+        for idx, info in reversed(rec["applied"]):  # newest first, so stacked edits unwind cleanly
             out = undo_change(info)
             if out.status == "undone":
-                rec["applied"].remove((idx, info))
+                store.remove_applied(pid, idx)
             results.append({"index": idx, "path": rec["proposal"]["changes"][idx]["path"],
                             "status": out.status, "detail": out.detail})
     return {"results": results}

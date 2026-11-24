@@ -1,38 +1,55 @@
-"""Server-side store of agent proposals.
+"""Server-side store of agent proposals (database-backed since Week 6).
 
 The approval endpoint applies exactly what the agents produced. The browser only says
-"apply proposal X, changes 0 and 2", it never sends code to write. In memory for now;
-Week 6 moves this to PostgreSQL.
+"apply proposal X, changes 0 and 2"; it never sends code to write. Proposals, and the
+undo information for applied changes, now survive backend restarts.
 """
+import base64
 import secrets
 import threading
-import time
 
-TTL_SECONDS = 2 * 60 * 60
-MAX_PROPOSALS = 50
+from app.database.session import session
+from app.models.tables import ProposalRow
+
+
+def _encode(undo: dict) -> dict:
+    original = undo["original"]
+    return {"path": undo["path"], "sha": undo["sha"],
+            "original_b64": None if original is None else base64.b64encode(original).decode()}
+
+
+def _decode(entry: dict) -> dict:
+    b64 = entry["original_b64"]
+    return {"path": entry["path"], "sha": entry["sha"], "original": None if b64 is None else base64.b64decode(b64)}
 
 
 class ProposalStore:
     def __init__(self) -> None:
-        self._items: dict[str, dict] = {}
-        self.lock = threading.RLock()
+        self.lock = threading.RLock()  # serialises apply/undo
 
     def save(self, repo_id: str, proposal: dict, review: dict | None = None) -> str:
-        with self.lock:
-            now = time.time()
-            for pid in [k for k, v in self._items.items() if now - v["created"] > TTL_SECONDS]:
-                del self._items[pid]
-            while len(self._items) >= MAX_PROPOSALS:
-                del self._items[min(self._items, key=lambda k: self._items[k]["created"])]
-            pid = secrets.token_urlsafe(9)
-            self._items[pid] = {"id": pid, "repo_id": repo_id, "proposal": proposal, "review": review,
-                                "created": now, "applied": []}  # applied: [(change_index, undo_info)]
-            return pid
+        pid = secrets.token_urlsafe(9)
+        with session() as s:
+            s.add(ProposalRow(id=pid, repo_id=repo_id, proposal=proposal, review=review, applied=[]))
+        return pid
 
     def get(self, pid: str) -> dict | None:
-        with self.lock:
-            rec = self._items.get(pid)
-            return rec if rec and time.time() - rec["created"] <= TTL_SECONDS else None
+        with session() as s:
+            row = s.get(ProposalRow, pid)
+            if not row:
+                return None
+            return {"id": row.id, "repo_id": row.repo_id, "proposal": row.proposal, "review": row.review,
+                    "applied": [(a["index"], _decode(a)) for a in row.applied]}
+
+    def add_applied(self, pid: str, index: int, undo: dict) -> None:
+        with session() as s:
+            row = s.get(ProposalRow, pid)
+            row.applied = [*row.applied, {"index": index, **_encode(undo)}]
+
+    def remove_applied(self, pid: str, index: int) -> None:
+        with session() as s:
+            row = s.get(ProposalRow, pid)
+            row.applied = [a for a in row.applied if a["index"] != index]
 
 
 store = ProposalStore()

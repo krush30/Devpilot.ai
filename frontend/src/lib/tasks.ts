@@ -38,13 +38,15 @@ export type StaticFlag = {
   text: string;
 };
 
+export type AgentUpdate = {
+  agent: AgentName;
+  status: "running" | "retrying" | "needs_input" | "error" | "done";
+  provider?: string | null;
+  data: Record<string, unknown>;
+};
+
 export type AgentEvent =
-  | {
-      agent: AgentName;
-      status: "running" | "retrying" | "needs_input" | "error" | "done";
-      provider?: string | null;
-      data: Record<string, unknown>;
-    }
+  | AgentUpdate
   | {
       agent: "system";
       status: "finished";
@@ -53,6 +55,7 @@ export type AgentEvent =
         error: string;
         question?: string;
         proposal_id?: string;
+        run_id?: string;
       };
     };
 

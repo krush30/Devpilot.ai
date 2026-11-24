@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useEffect, useState } from "react";
 import { Loader2 } from "lucide-react";
 import {
   applyProposal,
@@ -24,20 +24,26 @@ export default function ApplyPanel({ proposalId }: { proposalId: string }) {
   const [results, setResults] = useState<ApplyResult[]>([]);
   const [error, setError] = useState("");
 
-  const refresh = useCallback(async () => {
-    try {
-      setInfo(await getProposal(proposalId));
-    } catch (e) {
-      setError((e as Error).message);
-    }
-  }, [proposalId]);
+  // Called from event handlers (after apply/undo); their try/catch reports any error.
+  async function refresh() {
+    setInfo(await getProposal(proposalId));
+  }
 
+  // Initial load. State is set in callbacks only. Switching to a different proposal remounts this
+  // component (the parent passes key={proposalId}), so selection and results reset without an effect.
   useEffect(() => {
-    setSelected([]);
-    setResults([]);
-    setError("");
-    refresh();
-  }, [refresh]);
+    let active = true;
+    getProposal(proposalId)
+      .then((p) => {
+        if (active) setInfo(p);
+      })
+      .catch((e: Error) => {
+        if (active) setError(e.message);
+      });
+    return () => {
+      active = false;
+    };
+  }, [proposalId]);
 
   if (error && !info)
     return (

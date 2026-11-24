@@ -11,3 +11,5 @@
 
 backend/chroma_data
 backend/chroma_data/
+
+devpilot.db*
