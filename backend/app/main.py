@@ -7,6 +7,7 @@ from app.api.tasks import tasks
 from app.api.github import github
 from app.api.proposals import proposals
 from app.api.runs import runs
+from app.api.sandbox import sandbox
 
 app = FastAPI(title="DevPilot AI")
 
@@ -23,6 +24,7 @@ app.include_router(tasks)
 app.include_router(github)
 app.include_router(proposals)
 app.include_router(runs)
+app.include_router(sandbox)
 
 
 @app.get("/health")

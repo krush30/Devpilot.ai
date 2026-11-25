@@ -40,3 +40,14 @@ class ProposalRow(Base):
     proposal: Mapped[dict] = mapped_column(JSON)
     review: Mapped[dict | None] = mapped_column(JSON, nullable=True)
     applied: Mapped[list] = mapped_column(JSON, default=list)  # [{index, path, sha, original_b64}] for undo
+
+
+class SandboxRun(Base):
+    """Result of running generated tests for a proposal inside the Docker sandbox."""
+    __tablename__ = "sandbox_runs"
+
+    id: Mapped[str] = mapped_column(String(32), primary_key=True)
+    proposal_id: Mapped[str] = mapped_column(String(24), index=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, index=True)
+    status: Mapped[str] = mapped_column(String(20))
+    result: Mapped[dict] = mapped_column(JSON)
