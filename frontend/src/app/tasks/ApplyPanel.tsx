@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { Loader2 } from "lucide-react";
 import {
   applyProposal,
@@ -9,6 +9,7 @@ import {
   type ApplyResult,
   type ProposalInfo,
 } from "@/lib/proposals";
+import SandboxPanel from "./SandboxPanel";
 
 const STATUS_STYLE: Record<ApplyResult["status"], string> = {
   applied: "text-emerald-400",
@@ -24,24 +25,26 @@ export default function ApplyPanel({ proposalId }: { proposalId: string }) {
   const [results, setResults] = useState<ApplyResult[]>([]);
   const [error, setError] = useState("");
 
-  // Called from event handlers (after apply/undo); their try/catch reports any error.
-  async function refresh() {
-    setInfo(await getProposal(proposalId));
-  }
+  const refresh = useCallback(async () => {
+    try {
+      setInfo(await getProposal(proposalId));
+    } catch (e) {
+      setError((e as Error).message);
+    }
+  }, [proposalId]);
 
-  // Initial load. State is set in callbacks only. Switching to a different proposal remounts this
-  // component (the parent passes key={proposalId}), so selection and results reset without an effect.
+  // Load on mount. A new proposal gets a fresh component (the parent passes `key`), so no reset is needed.
   useEffect(() => {
-    let active = true;
+    let cancelled = false;
     getProposal(proposalId)
       .then((p) => {
-        if (active) setInfo(p);
+        if (!cancelled) setInfo(p);
       })
       .catch((e: Error) => {
-        if (active) setError(e.message);
+        if (!cancelled) setError(e.message);
       });
     return () => {
-      active = false;
+      cancelled = true;
     };
   }, [proposalId]);
 
@@ -189,6 +192,10 @@ export default function ApplyPanel({ proposalId }: { proposalId: string }) {
             </li>
           ))}
         </ul>
+      )}
+
+      {info.can_apply && (
+        <SandboxPanel key={proposalId} proposalId={proposalId} />
       )}
 
       <p className="text-xs text-zinc-500">
